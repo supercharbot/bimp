@@ -1,9 +1,5 @@
 import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 import { apiCall } from '../api';
-
-const fadeUp = { hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0, transition: { duration: 0.3 } } };
-const stagger = { hidden: {}, visible: { transition: { staggerChildren: 0.06 } } };
 
 export default function Tasks() {
   const [projects, setProjects] = useState(null);
@@ -24,39 +20,41 @@ export default function Tasks() {
     });
   }, []);
 
-  if (!projects) return <div className="skeleton" style={{ height: 200, borderRadius: 12 }} />;
+  if (!projects) return <div className="skeleton" style={{ height: 200 }} />;
 
   const open = tasks.filter(t => t.status === 'open');
   const completed = tasks.filter(t => t.status === 'completed');
 
   return (
-    <motion.div initial="hidden" animate="visible" variants={stagger}>
-      <motion.h1 variants={fadeUp} style={{ fontSize: '1.6rem', marginBottom: '24px' }}>Tasks</motion.h1>
-      {!tasks.length && <motion.p variants={fadeUp} style={{ color: 'var(--text-muted)' }}>No tasks yet.</motion.p>}
+    <div>
+      <h1 style={{ fontSize: '1.4rem', marginBottom: '22px' }}>Tasks</h1>
+      {!tasks.length && <p style={{ color: 'var(--text-muted)' }}>No tasks yet.</p>}
 
       {open.length > 0 && (
-        <motion.div variants={fadeUp} style={{ background: 'var(--bg-card)', borderRadius: '12px', padding: '20px', border: '1px solid var(--border)', marginBottom: '16px' }}>
-          <h2 style={{ fontSize: '0.95rem', color: 'var(--warning)', marginBottom: '12px' }}>Open ({open.length})</h2>
+        <div className="card animate-in" style={{ marginBottom: '14px' }}>
+          <h2 style={{ fontSize: '0.9rem', color: 'var(--warning)', marginBottom: '10px' }}>Open ({open.length})</h2>
           {open.map((t, i) => (
-            <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid var(--bg-hover)', display: 'flex', justifyContent: 'space-between' }}>
-              <div><div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t.description}</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>{t.project_name}</div></div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.due_date || '—'}</div>
+            <div key={i} style={{ padding: '9px 0', borderBottom: i < open.length - 1 ? '1px solid var(--bg-hover)' : 'none', display: 'flex', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t.description}</div>
+                <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginTop: '2px' }}>{t.project_name}</div>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', marginLeft: '16px' }}>{t.due_date || '—'}</div>
             </div>
           ))}
-        </motion.div>
+        </div>
       )}
 
       {completed.length > 0 && (
-        <motion.div variants={fadeUp} style={{ background: 'var(--bg-card)', borderRadius: '12px', padding: '20px', border: '1px solid var(--border)' }}>
-          <h2 style={{ fontSize: '0.95rem', color: 'var(--success)', marginBottom: '12px' }}>Completed ({completed.length})</h2>
+        <div className="card animate-in stagger-2">
+          <h2 style={{ fontSize: '0.9rem', color: 'var(--success)', marginBottom: '10px' }}>Completed ({completed.length})</h2>
           {completed.map((t, i) => (
-            <div key={i} style={{ padding: '10px 0', borderBottom: '1px solid var(--bg-hover)' }}>
+            <div key={i} style={{ padding: '8px 0', borderBottom: i < completed.length - 1 ? '1px solid var(--bg-hover)' : 'none' }}>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textDecoration: 'line-through' }}>{t.description}</div>
             </div>
           ))}
-        </motion.div>
+        </div>
       )}
-    </motion.div>
+    </div>
   );
 }

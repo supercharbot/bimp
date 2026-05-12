@@ -9,6 +9,19 @@
     <script src="https://accounts.google.com/gsi/client" async></script>
   </head>
   <body>
+    <div id="google-login-wrapper" style="display:none;position:fixed;inset:0;z-index:9999;background:#1a1a1a;align-items:center;justify-content:center;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:40px;max-width:360px;width:100%;padding:0 24px;">
+        <div style="text-align:center;">
+          <div style="font-size:2.4rem;font-weight:700;letter-spacing:-0.04em;font-family:'Plus Jakarta Sans',sans-serif;color:#e8e8e8;margin-bottom:8px;">BIMP</div>
+          <div style="font-size:0.85rem;color:#707070;letter-spacing:0.08em;text-transform:uppercase;">Business Intelligence & Monitoring</div>
+        </div>
+        <div style="width:100%;background:#2a2a2a;border:1px solid #333;border-radius:14px;padding:36px 32px;display:flex;flex-direction:column;align-items:center;gap:20px;">
+          <div style="font-size:0.9rem;color:#b0b0b0;">Sign in with your Develo account</div>
+          <div id="google-btn"></div>
+        </div>
+        <div style="font-size:0.75rem;color:#707070;">Develo Pty Ltd</div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
