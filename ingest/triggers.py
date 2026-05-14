@@ -90,7 +90,7 @@ def fetch_email_content(service, msg_id):
 
 
 def handle_gmail_notification(message, state):
-    data = json.loads(base64.b64decode(message.data).decode('utf-8'))
+    data = json.loads(message.data.decode('utf-8'))
     new_history_id = data.get('historyId')
     if not new_history_id:
         return
