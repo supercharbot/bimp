@@ -78,6 +78,10 @@ def screen_document(envelope, text):
     )
 
     raw = response.content[0].text.strip()
+    # Extract JSON from response
+    json_match = re.search(r"\{[^}]+\}", raw)
+    if json_match:
+        raw = json_match.group(0)
     raw = re.sub(r'^```(?:json)?\s*', '', raw)
     raw = re.sub(r'\s*```$', '', raw)
 

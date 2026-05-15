@@ -1,7 +1,159 @@
 import io
+import os
+import subprocess
+import tempfile
 import logging
+import fitz  # PyMuPDF
 
 logger = logging.getLogger(__name__)
+
+
+def classify_page(page):
+    text = page.get_text().strip()
+    text_len = len(text)
+    images = page.get_images()
+    drawings = page.get_drawings()
+    page_area = abs(page.rect)
+
+    if text_len > 100 and not images:
+        return "text"
+    if text_len > 100 and images:
+        return "mixed"
+    if not text_len and images:
+        for blk in page.get_text("dict")["blocks"]:
+            if blk.get("type") == 1:
+                bbox = fitz.Rect(blk["bbox"])
+                if page_area > 0 and abs(bbox & page.rect) / page_area >= 0.95:
+                    return "scanned"
+        return "image-heavy"
+    if len(drawings) > 200 and not images:
+        return "vector-drawing"
+    if text_len > 0 and text_len < 100:
+        return "sparse"
+    if text_len > 0:
+        return "text"
+    return "unknown"
+
+
+def ocr_page_bytes(page_pdf_bytes, dpi=300):
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as inp, \
+         tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as out:
+        inp.write(page_pdf_bytes)
+        inp.flush()
+        inp_path = inp.name
+        out_path = out.name
+
+    try:
+        result = subprocess.run(
+            [
+                "ocrmypdf",
+                "--jobs", "2",
+                "--output-type", "pdf",
+                "--skip-text",
+                "--max-image-mpixels", "500",
+                "--skip-big", "80",
+                "--image-dpi", str(dpi),
+                "--quiet",
+                inp_path,
+                out_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode not in (0, 6):  # 6 = already has text
+            logger.warning(f"OCRmyPDF returned {result.returncode}: {result.stderr[:200]}")
+            return ""
+
+        doc = fitz.open(out_path)
+        text = "\n".join(p.get_text().strip() for p in doc if p.get_text().strip())
+        doc.close()
+        return text
+    except subprocess.TimeoutExpired:
+        logger.warning("OCRmyPDF timeout")
+        return ""
+    except Exception as e:
+        logger.warning(f"OCR failed: {e}")
+        return ""
+    finally:
+        for p in (inp_path, out_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+def extract_single_page_pdf(doc, page_num):
+    new_doc = fitz.open()
+    new_doc.insert_pdf(doc, from_page=page_num, to_page=page_num)
+    pdf_bytes = new_doc.tobytes()
+    new_doc.close()
+    return pdf_bytes
+
+
+def extract_pdf_text(file_bytes):
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    all_text = []
+    total_pages = len(doc)
+    ocr_count = 0
+
+    for i, page in enumerate(doc):
+        page_type = classify_page(page)
+
+        if page_type == "text":
+            text = page.get_text().strip()
+            all_text.append(text)
+
+        elif page_type == "mixed":
+            text = page.get_text().strip()
+            page_pdf = extract_single_page_pdf(doc, i)
+            ocr_text = ocr_page_bytes(page_pdf, dpi=300)
+            if ocr_text and len(ocr_text.split()) > len(text.split()) + 10:
+                all_text.append(ocr_text)
+                ocr_count += 1
+            else:
+                all_text.append(text)
+
+        elif page_type == "scanned":
+            page_pdf = extract_single_page_pdf(doc, i)
+            ocr_text = ocr_page_bytes(page_pdf, dpi=300)
+            if ocr_text:
+                all_text.append(ocr_text)
+                ocr_count += 1
+            else:
+                logger.info(f"Page {i+1}: scanned but OCR returned nothing")
+
+        elif page_type == "image-heavy":
+            page_pdf = extract_single_page_pdf(doc, i)
+            ocr_text = ocr_page_bytes(page_pdf, dpi=200)
+            if ocr_text:
+                all_text.append(ocr_text)
+                ocr_count += 1
+
+        elif page_type == "sparse":
+            page_pdf = extract_single_page_pdf(doc, i)
+            ocr_text = ocr_page_bytes(page_pdf, dpi=300)
+            if ocr_text and len(ocr_text.split()) > len(page.get_text().strip().split()):
+                all_text.append(ocr_text)
+                ocr_count += 1
+                logger.info(f"Page {i+1}: sparse text, OCR got {len(ocr_text.split())} words")
+            else:
+                text = page.get_text().strip()
+                if text:
+                    all_text.append(text)
+
+        elif page_type == "vector-drawing":
+            text = page.get_text().strip()
+            if text:
+                all_text.append(text)
+
+        else:
+            logger.info(f"Page {i+1}: unknown type, skipping")
+
+    doc.close()
+    result = "\n\n".join(all_text)
+    logger.info(f"PDF: {total_pages} pages, {ocr_count} OCR'd, {len(result.split())} words")
+    return result.strip()
 
 
 def extract_email_text(raw_email):
@@ -13,47 +165,6 @@ def extract_email_text(raw_email):
         h.ignore_images = True
         body = h.handle(raw_email['html'])
     return body.strip()
-
-
-def extract_pdf_text(file_bytes):
-    import pypdf
-    import pytesseract
-    from PIL import Image
-
-    reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-    all_parts = []
-
-    for i, page in enumerate(reader.pages):
-        parts = []
-
-        # Text layer
-        text = page.extract_text() or ''
-        if text.strip():
-            parts.append(text.strip())
-
-        # Embedded images — OCR each one
-        try:
-            for img_key in page.images:
-                img_data = img_key.data
-                try:
-                    img = Image.open(io.BytesIO(img_data))
-                    if img.width < 100 or img.height < 100:
-                        continue
-                    ocr_text = pytesseract.image_to_string(img).strip()
-                    if len(ocr_text.split()) >= 5:
-                        parts.append(ocr_text)
-                        logger.info(f"Page {i+1}: OCR extracted {len(ocr_text.split())} words from image")
-                except Exception as e:
-                    logger.debug(f"Page {i+1}: skipped image: {e}")
-        except Exception as e:
-            logger.debug(f"Page {i+1}: no images or extraction failed: {e}")
-
-        if parts:
-            all_parts.append('\n'.join(parts))
-
-    result = '\n\n'.join(all_parts)
-    logger.info(f"PDF: {len(reader.pages)} pages, {len(result.split())} total words")
-    return result.strip()
 
 
 def extract_docx_text(file_bytes):
