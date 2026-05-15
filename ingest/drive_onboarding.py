@@ -89,6 +89,22 @@ def download_file(service, file_id, mime_type):
         return service.files().get_media(fileId=file_id, supportsAllDrives=True).execute()
 
 
+def match_project_by_folder(folder_path, projects):
+    """Match a file to a project based on its folder path."""
+    path_lower = folder_path.lower()
+    for p in projects:
+        addr = (p.get('property_address') or '').lower()
+        if addr and len(addr) > 5 and addr in path_lower:
+            return str(p['project_id'])
+        lot = (p.get('lot_number') or '').lower()
+        if lot and len(lot) > 2 and lot in path_lower:
+            return str(p['project_id'])
+        job = (p.get('job_number') or '').lower()
+        if job and len(job) > 2 and job in path_lower:
+            return str(p['project_id'])
+    return None
+
+
 def run_drive_onboarding(tenant_id, dry_run=False):
     service = get_drive_service()
 
@@ -118,11 +134,17 @@ def run_drive_onboarding(tenant_id, dry_run=False):
         logger.info(f"Dry run complete. {len(processable)} files would be processed.")
         return
 
+    # Load projects for folder matching
+    from store.store import get_all_projects
+    projects = get_all_projects(tenant_id)
+    logger.info(f"Loaded {len(projects)} projects for folder matching")
+
     # Process
     folder_cache = {}
     processed = 0
     failed = 0
     duplicates = 0
+    folder_matched = 0
 
     for i, f in enumerate(processable):
         file_id = f['id']
@@ -146,7 +168,7 @@ def run_drive_onboarding(tenant_id, dry_run=False):
             }
 
             # Skip SS (superseded) folders — store metadata only
-            if '/ss/' in folder_path.lower() or folder_path.lower().endswith('/ss'):
+            if '/ss/' in folder_path.lower() or folder_path.lower().endswith('/ss') or folder_path.lower() == 'ss':
                 from store.store import save_document
                 save_document(
                     tenant_id=tenant_id, source='drive', source_id=file_id,
@@ -157,7 +179,13 @@ def run_drive_onboarding(tenant_id, dry_run=False):
                 processed += 1
                 continue
 
-            doc_id = run_pipeline(tenant_id, raw_file, 'drive', file_bytes=file_bytes)
+            # Try folder-based project matching
+            matched_project = match_project_by_folder(folder_path, projects)
+            if matched_project:
+                folder_matched += 1
+
+            doc_id = run_pipeline(tenant_id, raw_file, 'drive', file_bytes=file_bytes,
+                                  folder_project_id=matched_project)
 
             if doc_id:
                 processed += 1
@@ -171,7 +199,7 @@ def run_drive_onboarding(tenant_id, dry_run=False):
         if (i + 1) % BATCH_SIZE == 0:
             logger.info(f"Progress: {i+1}/{len(processable)} ({processed} ok, {duplicates} dup, {failed} fail)")
 
-    logger.info(f"Drive onboarding complete: {processed} processed, {duplicates} duplicates, {failed} failed out of {len(processable)}")
+    logger.info(f"Drive onboarding complete: {processed} processed, {duplicates} duplicates, {failed} failed, {folder_matched} folder-matched out of {len(processable)}")
 
 
 if __name__ == '__main__':

@@ -52,7 +52,7 @@ def _set_triage_status(document_id, status):
         )
 
 
-def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=False):
+def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=False, folder_project_id=None):
     """
     Run the full ingest pipeline.
 
@@ -154,6 +154,14 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
     _set_triage_status(document_id, 'passed')
 
     # Step 7 — Understand
+    # If folder-matched, stamp project and skip expensive understand
+    if folder_project_id:
+        stamp_document_project(document_id, folder_project_id)
+        stamp_chunks_project(document_id, folder_project_id)
+        log_activity(tenant_id, folder_project_id, 'document_ingested',
+                     f"Ingested {envelope.get('source')}: {envelope.get('subject') or envelope.get('file_name')} (folder-matched)")
+        return document_id
+
     projects = get_all_projects(tenant_id)
     project_identifiers = [
         {
