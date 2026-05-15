@@ -4,7 +4,7 @@ from shared.embedding import embed_text
 def retrieve(query_text, tenant_id, project_id=None, source=None, date_from=None, date_to=None, limit=5):
     query_vector = embed_text(query_text)
 
-    filters = ["c.tenant_id = %s", "(c.source != 'drive' OR NOT EXISTS (SELECT 1 FROM documents d WHERE d.document_id = c.document_id AND LOWER(d.thread_id) LIKE '%/ss/%'))"]
+    filters = ["c.tenant_id = %s", "NOT EXISTS (SELECT 1 FROM documents d WHERE d.document_id = c.document_id AND d.source = 'drive' AND (LOWER(d.thread_id) LIKE '%%/ss/%%' OR LOWER(d.thread_id) LIKE '%%/ss'))"]
     params = [tenant_id]
 
     if project_id:
