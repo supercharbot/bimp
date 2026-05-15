@@ -4,6 +4,7 @@ from .chunk import chunk_text
 from .embed import embed_chunks
 from .understand import understand
 from .triage import check_triage, generate_block_rule
+from .haiku_screen import screen_document
 from store.store import (
     save_document, save_chunks, stamp_document_project,
     stamp_chunks_project, add_to_holding_queue, get_all_projects,
@@ -90,6 +91,30 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
                 f"Triage skipped: {envelope.get('subject') or envelope.get('file_name')} "
                 f"(rule: {triage_result['matched_rule']['value']})"
             )
+            return None
+
+
+    # Step 2b - Haiku screening
+    if text:
+        screen_result = screen_document(envelope, text)
+        if not screen_result['pass']:
+            save_document_skipped(
+                tenant_id=tenant_id,
+                source=envelope['source'],
+                source_id=envelope.get('source_id'),
+                subject=envelope.get('subject') or envelope.get('file_name'),
+                author=envelope.get('from') or envelope.get('author'),
+                timestamp=envelope.get('timestamp'),
+                thread_id=envelope.get('thread_id') or envelope.get('folder_path'),
+                version=envelope.get('version', 1)
+            )
+            sender = envelope.get('from') or envelope.get('author')
+            domain = generate_block_rule(sender)
+            if domain:
+                added = add_triage_rule(tenant_id, 'block_sender', domain)
+                if added:
+                    logger.info(f'Haiku auto-added triage rule: block {domain}')
+            logger.info(f"Haiku screened out: {envelope.get('subject') or envelope.get('file_name')} ({screen_result['reason']})")
             return None
 
     # Step 3 — Extract
