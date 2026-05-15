@@ -57,8 +57,8 @@ def screen_document(envelope, text):
     sender = envelope.get('from') or envelope.get('author') or ''
     recipient = envelope.get('to') or ''
 
-    if is_known_user(sender) or is_known_user(recipient):
-        logger.info(f"Haiku skip: known user ({sender} / {recipient})")
+    if is_known_user(sender):
+        logger.info(f"Haiku skip: known sender ({sender})")
         return {'pass': True, 'reason': 'known_user'}
 
     content_preview = ' '.join(text.split()[:500])
