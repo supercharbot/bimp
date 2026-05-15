@@ -29,11 +29,11 @@ def get_all_projects(tenant_id):
         cur.execute("SELECT * FROM projects WHERE tenant_id = %s", (tenant_id,))
         return [dict(row) for row in cur.fetchall()]
 
-def save_document(tenant_id, source, source_id, subject, author, timestamp, thread_id=None, project_id=None, version=1, needs_reply=False, needs_action=False, needs_documenting=False):
+def save_document(tenant_id, source, source_id, subject, author, timestamp, thread_id=None, project_id=None, version=1, needs_reply=False, needs_action=False, needs_documenting=False, phase=None):
     with db_cursor() as cur:
         cur.execute(
-            "INSERT INTO documents (tenant_id, project_id, source, source_id, subject, thread_id, author, timestamp, version, needs_reply, needs_action, needs_documenting) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT ON CONSTRAINT uq_document DO NOTHING RETURNING *",
-            (tenant_id, project_id, source, source_id, subject, thread_id, author, timestamp, version, needs_reply, needs_action, needs_documenting)
+            "INSERT INTO documents (tenant_id, project_id, source, source_id, subject, thread_id, author, timestamp, version, needs_reply, needs_action, needs_documenting, phase) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT ON CONSTRAINT uq_document DO NOTHING RETURNING *",
+            (tenant_id, project_id, source, source_id, subject, thread_id, author, timestamp, version, needs_reply, needs_action, needs_documenting, phase)
         )
         row = cur.fetchone()
         return dict(row) if row else None
@@ -78,10 +78,10 @@ def update_queue_status(queue_id, status):
     with db_cursor() as cur:
         cur.execute("UPDATE holding_queue SET status = %s WHERE queue_id = %s", (status, queue_id))
 
-def save_deadline(tenant_id, project_id, description, due_date, source_document_id):
+def save_deadline(tenant_id, project_id, description, due_date, source_document_id, urgency=None, due_date_basis=None):
     with db_cursor() as cur:
         cur.execute(
-            "INSERT INTO deadlines (tenant_id, project_id, description, due_date, source_document_id) VALUES (%s,%s,%s,%s,%s) RETURNING *",
+            "INSERT INTO deadlines (tenant_id, project_id, description, due_date, source_document_id, urgency, due_date_basis) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *",
             (tenant_id, project_id, description, due_date, source_document_id)
         )
         return dict(cur.fetchone())
@@ -94,10 +94,10 @@ def save_decision(tenant_id, project_id, description, date, source_document_id):
         )
         return dict(cur.fetchone())
 
-def save_action_item(tenant_id, project_id, description, assigned_to, due_date, source_document_id):
+def save_action_item(tenant_id, project_id, description, assigned_to, due_date, source_document_id, urgency=None, due_date_basis=None):
     with db_cursor() as cur:
         cur.execute(
-            "INSERT INTO action_items (tenant_id, project_id, description, assigned_to, due_date, source_document_id) VALUES (%s,%s,%s,%s,%s,%s) RETURNING *",
+            "INSERT INTO action_items (tenant_id, project_id, description, assigned_to, due_date, source_document_id, urgency, due_date_basis) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
             (tenant_id, project_id, description, assigned_to, due_date, source_document_id)
         )
         return dict(cur.fetchone())

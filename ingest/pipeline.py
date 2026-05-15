@@ -160,6 +160,13 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
     if project_id:
         stamp_document_project(document_id, project_id)
         stamp_chunks_project(document_id, project_id)
+
+    # Save phase from understand
+    phase = result.get('phase')
+    if phase:
+        from store.database import db_cursor as _db_cursor
+        with _db_cursor() as cur:
+            cur.execute("UPDATE documents SET phase = %s WHERE document_id = %s", (phase, document_id))
     else:
         add_to_holding_queue(
             tenant_id=tenant_id,
@@ -181,14 +188,14 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
     for fact in result.get('facts', []):
         if fact['type'] == 'deadline':
             save_deadline(tenant_id, project_id, fact['description'],
-                          fact.get('due_date'), document_id)
+                          fact.get('due_date'), document_id, fact.get('urgency'), fact.get('due_date_basis'))
         elif fact['type'] == 'decision':
             save_decision(tenant_id, project_id, fact['description'],
                           fact.get('due_date') or str(datetime.utcnow().date()),
                           document_id)
         elif fact['type'] == 'action_item':
             save_action_item(tenant_id, project_id, fact['description'],
-                             None, fact.get('due_date'), document_id)
+                             None, fact.get('due_date'), document_id, fact.get('urgency'), fact.get('due_date_basis'))
 
     # Step 11 — Auto-complete action items
     for update in result.get('action_updates', []):

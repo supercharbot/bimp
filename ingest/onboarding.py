@@ -1,6 +1,6 @@
 """
 Onboarding module for new tenants.
-Fetches last 3 months of email from the connected inbox,
+Fetches last month of email from the connected inbox,
 processes in batches of 50. Each batch builds triage rules
 that filter subsequent batches.
 
@@ -56,13 +56,13 @@ def run_onboarding(tenant_id):
     """
     Run the onboarding process for a tenant.
 
-    1. Fetch all email IDs from the last 3 months
+    1. Fetch all email IDs from the last month
     2. Process in batches of 50
     3. First batch: skip_triage=True (no rules exist yet)
     4. Subsequent batches: triage rules applied, filtering grows
     """
     service = get_gmail_service()
-    three_months_ago = datetime.utcnow() - timedelta(days=90)
+    three_months_ago = datetime.utcnow() - timedelta(days=30)
 
     logger.info(f"Onboarding tenant {tenant_id}: fetching emails since {three_months_ago.date()}")
 
