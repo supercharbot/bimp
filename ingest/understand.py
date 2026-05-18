@@ -38,6 +38,10 @@ If not relevant: return {{"relevant": false, "relevance_reason": "brief reason"}
 - **division** — subdivision, survey plans, Section 51, LTO, deposited plans, easements.
 - **sales** — contracts of sale, settlements, agent correspondence, purchaser management.
 
+## Document Structure
+
+The content below may include text from the email body followed by text extracted from attachments. Attachment content appears after a line like "--- Attachment: filename.pdf ---". The attachment often contains the most important information (invoice details, quote line items, contact details, terms and conditions). Prioritise extracting facts, contacts, and financial items from attachment content.
+
 ## Document Being Analysed
 
 Source: {source}
@@ -86,14 +90,16 @@ One sentence: what is this document and why does it matter.
 - "adversarial" — dispute, threat, complaint, escalation language
 
 ### "contacts" (array)
-People mentioned or involved. Each object:
-- "name" — full name
-- "email" — if visible
-- "phone" — if visible
-- "company" — organisation
-- "role" — their function (e.g. "civil_engineer", "council_planner", "sales_agent", "solicitor", "builder", "purchaser", "surveyor", "certifier", "accountant", "energy_assessor")
+Extract contact details from WITHIN the document content — letterheads, signatures, attachment headers, quote footers, invoice headers. Do NOT simply use the email From/To addresses provided in the headers above, as those are often automated systems (e.g. Xero, DocuSign) rather than the actual person or company.
 
-Only extract contacts where you can identify at least a name AND (email OR company). Do not extract generic senders like "noreply@" or "info@".
+Each object:
+- "name" — full name of the actual person (not a system name)
+- "email" — their real business email if found in the document content. NEVER use automated/system addresses like messaging-service@, noreply@, post.xero.com, notifications@, mailer-daemon@
+- "phone" — if visible in the document
+- "company" — organisation name
+- "role" — their function (e.g. "civil_engineer", "council_planner", "sales_agent", "solicitor", "builder", "purchaser", "surveyor", "certifier", "accountant", "energy_assessor", "cladding_contractor")
+
+Only extract contacts where you can identify at least a name AND (email OR company). If the document is from a company but you cannot identify a specific person's name, use the company name as the contact name.
 
 ### "facts" (array)
 Each fact object:
@@ -131,7 +137,7 @@ Expected responses. Each object:
 - "source_quote" — the request (under 30 words)
 
 ### "key_quotes" (array of strings)
-The 1-3 most important sentences from the document. Exact text. These should be the sentences someone would want to read without reading the full document. Always include at least one key quote.
+The 1-3 most important sentences or phrases from the document. Exact text. These should be the phrases someone would want to see without reading the full document — amounts, conditions, deadlines, decisions, or scope descriptions. You MUST always include at least one key quote. For quotes and invoices, include the total amount and key terms.
 
 ### "action_updates" (array)
 If this document completes any open action items listed above:
@@ -267,7 +273,8 @@ def _validate(result):
             "source_quote": str(f.get("source_quote", ""))[:200],
         })
 
-    # Validate contacts
+    # Validate contacts — filter out system emails
+    system_domains = {'post.xero.com', 'xero.com', 'docusign.net', 'google.com', 'googleapis.com'}
     contacts = []
     for c in result.get("contacts", []):
         if not isinstance(c, dict):
@@ -276,13 +283,20 @@ def _validate(result):
         email = c.get("email")
         company = c.get("company")
         if name and (email or company):
-            contacts.append({
-                "name": str(name),
-                "email": str(email) if email else None,
-                "phone": str(c.get("phone", "")) if c.get("phone") else None,
-                "company": str(company) if company else None,
-                "role": str(c.get("role", "")) if c.get("role") else None,
-            })
+            # Filter out system email addresses
+            if email:
+                email_lower = str(email).lower()
+                email_domain = email_lower.split('@')[-1] if '@' in email_lower else ''
+                if email_domain in system_domains or 'messaging-service' in email_lower or 'noreply' in email_lower or 'no-reply' in email_lower or 'notifications' in email_lower:
+                    email = None  # Strip system email but keep the contact
+            if name and (email or company):
+                contacts.append({
+                    "name": str(name),
+                    "email": str(email).lower().strip() if email else None,
+                    "phone": str(c.get("phone", "")) if c.get("phone") else None,
+                    "company": str(company) if company else None,
+                    "role": str(c.get("role", "")) if c.get("role") else None,
+                })
 
     # Validate commitments
     commitments = []
