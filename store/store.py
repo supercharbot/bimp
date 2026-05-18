@@ -82,7 +82,7 @@ def save_deadline(tenant_id, project_id, description, due_date, source_document_
     with db_cursor() as cur:
         cur.execute(
             "INSERT INTO deadlines (tenant_id, project_id, description, due_date, source_document_id, urgency, due_date_basis) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *",
-            (tenant_id, project_id, description, due_date, source_document_id)
+            (tenant_id, project_id, description, due_date, source_document_id, urgency, due_date_basis)
         )
         return dict(cur.fetchone())
 
@@ -98,7 +98,7 @@ def save_action_item(tenant_id, project_id, description, assigned_to, due_date, 
     with db_cursor() as cur:
         cur.execute(
             "INSERT INTO action_items (tenant_id, project_id, description, assigned_to, due_date, source_document_id, urgency, due_date_basis) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
-            (tenant_id, project_id, description, assigned_to, due_date, source_document_id)
+            (tenant_id, project_id, description, assigned_to, due_date, source_document_id, urgency, due_date_basis)
         )
         return dict(cur.fetchone())
 

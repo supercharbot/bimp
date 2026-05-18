@@ -1,8 +1,8 @@
 """
 Understand step — analyses documents with a land-development lens.
-Direct Claude API call with a fixed domain prompt.
-Returns structured intelligence: relevance, classification, project match, facts,
-and action item updates (auto-completion of tasks).
+Extracts: relevance, project match, phase, classification, contacts,
+facts, commitments, financial items, follow-ups, key quotes,
+relationship tone, thread status, and action item updates.
 """
 import anthropic
 import os
@@ -20,142 +20,134 @@ logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
-UNDERSTAND_PROMPT = """You are analysing a document for a land development company. Your job is to determine if this document is relevant to the business, and if so, extract structured intelligence from it.
+UNDERSTAND_PROMPT = """You are analysing a document for Develo, a land development company in Adelaide, South Australia. Develo develops residential House and Land Packages — acquiring sites, subdividing, managing planning and construction, and selling to purchasers.
 
 ## Relevance
 
-A document is relevant if it directly relates to:
-- A property, site, or development project
-- A contractual, financial, or legal matter involving the business
-- A regulatory or council matter
-- Work being done by a contractor, consultant, or supplier for the business
-- Internal business operations (team communication about projects, invoices, quotes)
+Relevant: property/site/project correspondence, contracts, invoices, quotes, council/government, contractors, consultants, legal, financial, sales, purchaser, builder, engineering, surveying, planning.
 
-A document is NOT relevant if it is:
-- Marketing, newsletters, or promotional material (even if the topic is property or development)
-- Automated system notifications (Google Drive shares, calendar invites, security alerts)
-- Personal or unrelated correspondence
-- Spam or bulk email
-- Industry news, articles, or thought pieces not addressed to the business directly
+NOT relevant: marketing newsletters, automated notifications, spam, industry news not addressed to the business, social media, recruitment spam.
 
-If the document is not relevant, return: {{"relevant": false, "relevance_reason": "brief reason"}}
-If relevant, continue with full analysis below.
+If not relevant: return {{"relevant": false, "relevance_reason": "brief reason"}}
 
 ## Land Development Phases
 
-Classify which phase this document relates to:
-
-### Acquisition
-Buying or securing land for development.
-Key documents: contracts of sale, option agreements, due diligence reports, title searches, valuation reports, finance approvals, vendor/agent correspondence, feasibility studies.
-Key signals: settlement dates, option expiry, purchase price, contract conditions, cooling-off periods, sunset clauses.
-
-### Approvals
-Getting permission to develop the land.
-Key documents: development applications, council correspondence, planning reports, referral agency responses, conditions of approval, amended plans, representations.
-Key signals: DA numbers, assessment references, lodgement dates, information requests, conditions, approval/refusal, appeal deadlines, referral triggers.
-Relevant bodies: council planning departments, SCAP, SA Water, SAPN, CFS, EPA, DEW, DPTI, NativVeg.
-
-### Delivery
-Designing and building the development.
-Key documents: engineering plans, architectural drawings, contractor quotes, invoices, site inspection reports, progress claims, variation requests, practical completion certificates, defect notices, building certifier correspondence.
-Key signals: construction timelines, inspection dates, payment schedules, variations, defect liability periods, insurance certificates, safety reports.
-
-### Division
-Subdividing the land into individual lots.
-Key documents: survey plans, plan of division, Section 51 clearance applications, LTO lodgement, deposited plans, easement documents, community title schemes.
-Key signals: lot/allotment numbers, deposited plan numbers, Section 51 requirements, LTO references, plan sealing dates, clearance conditions.
-
-### Sales
-Selling the developed lots.
-Key documents: contracts of sale, settlement statements, agent agreements, marketing materials (from the business's own agent, not inbound), handover documentation, defect rectification.
-Key signals: settlement dates, deposit amounts, contract conditions, sunset clauses, buyer correspondence.
+- **acquisition** — buying/securing land. Contracts of sale, due diligence, valuations, finance.
+- **approvals** — DA, council, planning, referrals, conditions, amended plans.
+- **delivery** — design, construction, inspections, contractor work, progress claims, defects.
+- **division** — subdivision, survey plans, Section 51, LTO, deposited plans, easements.
+- **sales** — contracts of sale, settlements, agent correspondence, purchaser management.
 
 ## Document Being Analysed
 
 Source: {source}
 Subject/Name: {subject}
 From: {sender}
+To: {recipient}
 Date: {timestamp}
 
-Content:
+Content (first 3000 chars):
 {content}
 
 ## Known Projects
-
 {projects}
 
 ## Open Action Items
-
-These are tasks currently open across all projects. If this document resolves or completes any of them, include the action_id in action_updates.
-
 {action_items}
 
 ## What To Extract
 
-Return a JSON object with these keys:
+Return a JSON object with ALL of the following keys. Every key MUST be present even if the value is an empty array or null.
 
 ### "relevant" (boolean)
-Is this document relevant to a land development business? If false, include "relevance_reason" and stop.
-
 ### "relevance_reason" (string)
-Brief explanation of why the document is or is not relevant.
 
 ### "classification" (array, emails only)
-One or more of:
-- "needs_reply" — sender expects a response
-- "needs_action" — something must be done (submit documents, pay invoice, attend inspection, meet a deadline)
-- "needs_documenting" — contains a decision, approval, condition, or fact worth recording
+One or more of: "needs_reply", "needs_action", "needs_documenting"
 
 ### "project_match" (string or null)
-The project UUID from the known projects list if the document relates to one.
-Match on: property address (including partial), lot/allotment numbers, DA number, CT reference, job number, council reference, client name, or anything in project metadata.
-Null if no confident match.
+Project UUID from known projects. Match on address, lot numbers, DA numbers, client names, metadata. Null if no match.
 
 ### "summary" (string)
-One or two sentences: what is this document and why does it matter.
+One sentence: what is this document and why does it matter.
 
 ### "phase" (string or null)
-Which phase: "acquisition", "approvals", "delivery", "division", "sales", or null.
+"acquisition", "approvals", "delivery", "division", "sales", or null.
+
+### "thread_status" (string, always required)
+- "new_request" — first contact or new topic
+- "follow_up" — chasing or continuing a previous conversation
+- "resolution" — confirming something is done/resolved/approved
+- "informational" — FYI, no action expected
+
+### "relationship_tone" (string, always required)
+- "collaborative" — friendly, working together
+- "transactional" — neutral, business as usual
+- "adversarial" — dispute, threat, complaint, escalation language
+
+### "contacts" (array)
+People mentioned or involved. Each object:
+- "name" — full name
+- "email" — if visible
+- "phone" — if visible
+- "company" — organisation
+- "role" — their function (e.g. "civil_engineer", "council_planner", "sales_agent", "solicitor", "builder", "purchaser", "surveyor", "certifier", "accountant", "energy_assessor")
+
+Only extract contacts where you can identify at least a name AND (email OR company). Do not extract generic senders like "noreply@" or "info@".
 
 ### "facts" (array)
-Each fact is an object with:
-- "type" — one of: "action_item", "deadline", "decision", "condition", "financial", "risk"
-- "description" — plain language summary
-- "due_date" — ISO 8601 date if stated or calculable, null otherwise
-- "due_date_basis" — "explicit" (date stated), "calculated" (e.g. 28 days from notice date), "inferred" (estimate), or null
-- "urgency" — "critical" (regulatory deadline, settlement, DA condition), "high" (client commitment, upcoming inspection), "normal" (routine), or null
-- "source_quote" — the key phrase from the document supporting this fact (under 30 words)
+Each fact object:
+- "type" — "action_item", "deadline", "decision", "condition", "financial", "risk"
+- "description" — plain language
+- "due_date" — ISO date if stated or calculable, null otherwise
+- "due_date_basis" — "explicit", "calculated", "inferred", or null
+- "urgency" — "critical", "high", "normal", or null
+- "assigned_to_name" — person responsible if identifiable, null otherwise
+- "source_quote" — key phrase (under 30 words)
+
+### "commitments" (array)
+Promises made BY someone TO Develo. NOT Develo's own tasks. Each object:
+- "who" — person or company making the promise
+- "what" — what they committed to
+- "by_when" — ISO date if stated, null otherwise
+- "source_quote" — their exact words (under 30 words)
+
+### "financial_items" (array)
+Invoices, quotes, payment references. Each object:
+- "type" — "invoice", "quote", "payment", "credit_note"
+- "from_entity" — who is charging/quoting
+- "amount" — number (no currency symbol, no commas)
+- "gst_included" — boolean
+- "invoice_number" — if stated
+- "due_date" — ISO date if stated
+- "status" — "quoted", "invoiced", "paid", "overdue", "disputed"
+
+### "follow_ups" (array)
+Expected responses. Each object:
+- "who_should_respond" — person or role expected to respond
+- "to_whom" — who is waiting for the response
+- "regarding" — what needs responding to
+- "by_when" — ISO date if stated or calculable
+- "source_quote" — the request (under 30 words)
+
+### "key_quotes" (array of strings)
+The 1-3 most important sentences from the document. Exact text. These should be the sentences someone would want to read without reading the full document. Always include at least one key quote.
 
 ### "action_updates" (array)
-If this document completes any open action items listed above, include them here. Each entry:
-- "action_id" — the UUID of the action item being resolved
+If this document completes any open action items listed above:
+- "action_id" — UUID
 - "new_status" — "completed"
-- "reason" — brief explanation of how this document resolves the action item
+- "reason" — how this document resolves it
 
-Only mark an action item as completed if the document clearly shows the task is done — e.g. requested documents are attached, payment is confirmed, inspection is completed. A reply saying "will do" or "working on it" does NOT complete the task.
+Only complete an action if clearly done — "will do" does NOT count.
 
-### Deadline Calculation
-When a document says "within X days of this notice" or "within X days of [event]", calculate the actual date if the event date is known. State the basis in due_date_basis.
-"Prior to" or "before" conditions are hard blockers — mark as critical urgency.
+IMPORTANT: You MUST return ALL keys listed above. If a section has no items, return an empty array []. Do not omit any keys.
 
-Return only valid JSON. No markdown, no commentary, no code fences."""
+Return ONLY valid JSON. No markdown, no commentary, no code fences."""
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 def understand(envelope, chunks, project_identifiers, open_action_items=None):
-    """
-    Analyse a document with a land-development lens.
-
-    Args:
-        envelope: Document metadata dict (source, subject/file_name, from, timestamp, etc.)
-        chunks: List of chunk dicts with 'text' key
-        project_identifiers: List of project dicts for matching
-        open_action_items: List of open action item dicts (optional)
-
-    Returns:
-        Dict with relevant, classification, project_match, facts, summary, phase, action_updates
-    """
     text = ' '.join([c['text'] for c in chunks[:3]])[:3000]
 
     if open_action_items:
@@ -174,7 +166,8 @@ def understand(envelope, chunks, project_identifiers, open_action_items=None):
     prompt = UNDERSTAND_PROMPT.format(
         source=envelope.get('source', 'unknown'),
         subject=envelope.get('subject') or envelope.get('file_name', 'unknown'),
-        sender=envelope.get('from', 'unknown'),
+        sender=envelope.get('from') or envelope.get('author', 'unknown'),
+        recipient=envelope.get('to', 'unknown'),
         timestamp=envelope.get('timestamp', 'unknown'),
         content=text,
         projects=json.dumps(project_identifiers, indent=2),
@@ -183,7 +176,7 @@ def understand(envelope, chunks, project_identifiers, open_action_items=None):
 
     response = client.messages.create(
         model=MODEL,
-        max_tokens=2000,
+        max_tokens=3000,
         messages=[{"role": "user", "content": prompt}]
     )
 
@@ -203,19 +196,24 @@ def understand(envelope, chunks, project_identifiers, open_action_items=None):
 def _empty_result():
     return {
         "relevant": True,
-        "relevance_reason": "Failed to analyse — defaulting to relevant",
+        "relevance_reason": "Failed to analyse - defaulting to relevant",
         "classification": [],
         "project_match": None,
         "facts": [],
         "summary": "Document analysis failed.",
         "phase": None,
+        "thread_status": "informational",
+        "relationship_tone": "transactional",
+        "contacts": [],
+        "commitments": [],
+        "financial_items": [],
+        "follow_ups": [],
+        "key_quotes": [],
         "action_updates": [],
     }
 
 
 def _validate(result):
-    """Ensure the result has all expected keys with correct types."""
-
     relevant = result.get("relevant", True)
     if not relevant:
         return {
@@ -226,6 +224,13 @@ def _validate(result):
             "facts": [],
             "summary": str(result.get("relevance_reason", "")),
             "phase": None,
+            "thread_status": "informational",
+            "relationship_tone": "transactional",
+            "contacts": [],
+            "commitments": [],
+            "financial_items": [],
+            "follow_ups": [],
+            "key_quotes": [],
             "action_updates": [],
         }
 
@@ -233,54 +238,114 @@ def _validate(result):
     valid_fact_types = {"action_item", "deadline", "decision", "condition", "financial", "risk"}
     valid_urgencies = {"critical", "high", "normal", None}
     valid_phases = {"acquisition", "approvals", "delivery", "division", "sales", None}
+    valid_tones = {"collaborative", "transactional", "adversarial"}
+    valid_thread = {"new_request", "follow_up", "resolution", "informational"}
 
-    classification = result.get("classification", [])
-    if not isinstance(classification, list):
-        classification = []
-    classification = [c for c in classification if c in valid_classifications]
+    classification = [c for c in result.get("classification", []) if c in valid_classifications]
 
     project_match = result.get("project_match")
     if project_match is not None and not isinstance(project_match, str):
         project_match = None
 
-    phase = result.get("phase")
-    if phase not in valid_phases:
-        phase = None
+    phase = result.get("phase") if result.get("phase") in valid_phases else None
+    thread_status = result.get("thread_status") if result.get("thread_status") in valid_thread else "informational"
+    relationship_tone = result.get("relationship_tone") if result.get("relationship_tone") in valid_tones else "transactional"
 
-    raw_facts = result.get("facts", [])
-    if not isinstance(raw_facts, list):
-        raw_facts = []
-
+    # Validate facts
     facts = []
-    for f in raw_facts:
-        if not isinstance(f, dict):
+    for f in result.get("facts", []):
+        if not isinstance(f, dict) or f.get("type") not in valid_fact_types:
             continue
-        fact_type = f.get("type")
-        if fact_type not in valid_fact_types:
-            continue
-        fact = {
-            "type": fact_type,
+        facts.append({
+            "type": f["type"],
             "description": str(f.get("description", "")),
             "due_date": f.get("due_date"),
             "due_date_basis": f.get("due_date_basis"),
             "urgency": f.get("urgency") if f.get("urgency") in valid_urgencies else None,
+            "assigned_to_name": f.get("assigned_to_name"),
             "source_quote": str(f.get("source_quote", ""))[:200],
-        }
-        facts.append(fact)
+        })
 
-    raw_updates = result.get("action_updates", [])
-    if not isinstance(raw_updates, list):
-        raw_updates = []
+    # Validate contacts
+    contacts = []
+    for c in result.get("contacts", []):
+        if not isinstance(c, dict):
+            continue
+        name = c.get("name")
+        email = c.get("email")
+        company = c.get("company")
+        if name and (email or company):
+            contacts.append({
+                "name": str(name),
+                "email": str(email) if email else None,
+                "phone": str(c.get("phone", "")) if c.get("phone") else None,
+                "company": str(company) if company else None,
+                "role": str(c.get("role", "")) if c.get("role") else None,
+            })
 
+    # Validate commitments
+    commitments = []
+    for cm in result.get("commitments", []):
+        if not isinstance(cm, dict) or not cm.get("who") or not cm.get("what"):
+            continue
+        commitments.append({
+            "who": str(cm["who"]),
+            "what": str(cm["what"]),
+            "by_when": cm.get("by_when"),
+            "source_quote": str(cm.get("source_quote", ""))[:200],
+        })
+
+    # Validate financial items
+    financial_items = []
+    valid_fi_types = {"invoice", "quote", "payment", "credit_note"}
+    valid_fi_status = {"quoted", "invoiced", "paid", "overdue", "disputed"}
+    for fi in result.get("financial_items", []):
+        if not isinstance(fi, dict) or fi.get("type") not in valid_fi_types:
+            continue
+        amount = fi.get("amount")
+        if amount is not None:
+            try:
+                amount = float(str(amount).replace(",", "").replace("$", ""))
+            except (ValueError, TypeError):
+                amount = None
+        financial_items.append({
+            "type": fi["type"],
+            "from_entity": str(fi.get("from_entity", "")),
+            "amount": amount,
+            "gst_included": bool(fi.get("gst_included", False)),
+            "invoice_number": str(fi.get("invoice_number", "")) if fi.get("invoice_number") else None,
+            "due_date": fi.get("due_date"),
+            "status": fi.get("status") if fi.get("status") in valid_fi_status else "invoiced",
+        })
+
+    # Validate follow-ups
+    follow_ups = []
+    for fu in result.get("follow_ups", []):
+        if not isinstance(fu, dict) or not fu.get("regarding"):
+            continue
+        follow_ups.append({
+            "who_should_respond": str(fu.get("who_should_respond", "")),
+            "to_whom": str(fu.get("to_whom", "")),
+            "regarding": str(fu["regarding"]),
+            "by_when": fu.get("by_when"),
+            "source_quote": str(fu.get("source_quote", ""))[:200],
+        })
+
+    # Validate key quotes
+    key_quotes = []
+    for kq in result.get("key_quotes", []):
+        if isinstance(kq, str) and len(kq.strip()) > 10:
+            key_quotes.append(kq.strip()[:500])
+    key_quotes = key_quotes[:3]
+
+    # Validate action updates
     action_updates = []
-    for u in raw_updates:
+    for u in result.get("action_updates", []):
         if not isinstance(u, dict):
             continue
-        action_id = u.get("action_id")
-        new_status = u.get("new_status")
-        if action_id and new_status == "completed":
+        if u.get("action_id") and u.get("new_status") == "completed":
             action_updates.append({
-                "action_id": str(action_id),
+                "action_id": str(u["action_id"]),
                 "new_status": "completed",
                 "reason": str(u.get("reason", "")),
             })
@@ -293,5 +358,12 @@ def _validate(result):
         "facts": facts,
         "summary": str(result.get("summary", "")),
         "phase": phase,
+        "thread_status": thread_status,
+        "relationship_tone": relationship_tone,
+        "contacts": contacts,
+        "commitments": commitments,
+        "financial_items": financial_items,
+        "follow_ups": follow_ups,
+        "key_quotes": key_quotes,
         "action_updates": action_updates,
     }
