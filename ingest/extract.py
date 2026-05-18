@@ -164,6 +164,34 @@ def extract_email_text(raw_email):
         h.ignore_links = True
         h.ignore_images = True
         body = h.handle(raw_email['html'])
+
+    # Extract text from attachments
+    for att in raw_email.get('attachments', []):
+        if not att.get('data'):
+            continue
+        mime = att.get('mime_type', '').lower()
+        filename = att.get('filename', '').lower()
+        att_text = ''
+
+        try:
+            if 'pdf' in mime or filename.endswith('.pdf'):
+                att_text = extract_pdf_text(att['data'])
+            elif 'word' in mime or filename.endswith('.docx') or filename.endswith('.doc'):
+                att_text = extract_docx_text(att['data'])
+            elif 'spreadsheet' in mime or filename.endswith('.xlsx') or filename.endswith('.xls'):
+                att_text = extract_xlsx_text(att['data'])
+            elif 'text' in mime or filename.endswith('.txt') or filename.endswith('.csv'):
+                att_text = att['data'].decode('utf-8', errors='ignore')
+            else:
+                logger.info(f"Skipping unsupported attachment: {att.get('filename', 'unknown')} ({mime})")
+                continue
+
+            if att_text:
+                logger.info(f"Attachment extracted: {att.get('filename', 'unknown')} ({len(att_text.split())} words)")
+                body += f"\n\n--- Attachment: {att.get('filename', 'unknown')} ---\n{att_text}"
+        except Exception as e:
+            logger.warning(f"Failed to extract attachment {att.get('filename', 'unknown')}: {e}")
+
     return body.strip()
 
 

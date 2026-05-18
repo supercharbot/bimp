@@ -25,6 +25,27 @@ DEVELO_DRIVE_ID = '0AEbziIBtyuWAUk9PVA'
 STATE_FILE = os.path.expanduser('~/bimp/.trigger_state.json')
 DRIVE_POLL_INTERVAL = 300
 
+# Attachment types we can extract text from
+EXTRACTABLE_MIMES = {
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'text/plain',
+    'text/csv',
+    'text/html',
+}
+
+# Skip these — images, signatures, inline content
+SKIP_MIMES = {
+    'image/png', 'image/jpeg', 'image/gif', 'image/bmp', 'image/webp',
+    'application/pkcs7-signature', 'application/pgp-signature',
+}
+
+# Max attachment size to download (10MB)
+MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024
+
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -45,7 +66,7 @@ def fetch_email_content(service, msg_id):
 
     body = ''
     html = ''
-    attachments = []
+    attachment_meta = []
 
     def walk_parts(parts):
         nonlocal body, html
@@ -57,11 +78,11 @@ def fetch_email_content(service, msg_id):
             elif mime == 'text/html' and data:
                 html = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
             elif part.get('filename') and part['body'].get('attachmentId'):
-                attachments.append({
+                attachment_meta.append({
                     'filename': part['filename'],
                     'mime_type': mime,
                     'attachment_id': part['body']['attachmentId'],
-                    'message_id': msg_id
+                    'size': part['body'].get('size', 0),
                 })
             if 'parts' in part:
                 walk_parts(part['parts'])
@@ -76,6 +97,46 @@ def fetch_email_content(service, msg_id):
         else:
             body = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
 
+    # Download extractable attachments
+    attachments = []
+    for att in attachment_meta:
+        mime = att['mime_type'].lower()
+        filename = att['filename'].lower()
+        size = att.get('size', 0)
+
+        # Skip images and signatures
+        if mime in SKIP_MIMES:
+            continue
+
+        # Skip oversized attachments
+        if size > MAX_ATTACHMENT_SIZE:
+            logger.warning(f"Skipping oversized attachment: {att['filename']} ({size} bytes)")
+            continue
+
+        # Check if extractable by mime type or file extension
+        is_extractable = mime in EXTRACTABLE_MIMES
+        if not is_extractable:
+            if filename.endswith(('.pdf', '.docx', '.doc', '.xlsx', '.xls', '.txt', '.csv')):
+                is_extractable = True
+
+        if is_extractable:
+            try:
+                att_response = service.users().messages().attachments().get(
+                    userId='me', messageId=msg_id, id=att['attachment_id']
+                ).execute()
+                att_bytes = base64.urlsafe_b64decode(att_response['data'])
+                attachments.append({
+                    'filename': att['filename'],
+                    'mime_type': att['mime_type'],
+                    'attachment_id': att['attachment_id'],
+                    'data': att_bytes,
+                })
+                logger.info(f"Downloaded attachment: {att['filename']} ({len(att_bytes)} bytes)")
+            except Exception as e:
+                logger.warning(f"Failed to download attachment {att['filename']}: {e}")
+        else:
+            logger.debug(f"Skipping non-extractable attachment: {att['filename']} ({mime})")
+
     return {
         'message_id': msg_id,
         'from': headers.get('from', ''),
@@ -85,7 +146,8 @@ def fetch_email_content(service, msg_id):
         'thread_id': msg.get('threadId'),
         'body': body,
         'html': html,
-        'attachment_ids': [a['attachment_id'] for a in attachments]
+        'attachments': attachments,
+        'attachment_ids': [a['attachment_id'] for a in attachment_meta],
     }
 
 
