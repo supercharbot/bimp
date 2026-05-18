@@ -9,7 +9,9 @@ from store.store import (
     save_document, save_chunks, stamp_document_project,
     stamp_chunks_project, add_to_holding_queue, get_all_projects,
     update_document_status, save_deadline, save_decision,
-    save_action_item, log_activity
+    save_action_item, log_activity, upsert_contact,
+    link_contact_to_project, save_commitment, save_financial_item,
+    save_follow_up, update_document_metadata
 )
 from store.triage_store import (
     get_triage_rules, add_triage_rule, save_document_skipped
@@ -200,12 +202,19 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
             expires_at=datetime.utcnow() + timedelta(days=7)
         )
 
-    # Save phase from understand
+    # Save phase and metadata from understand
     phase = result.get('phase')
+    summary = result.get('summary')
+    relationship_tone = result.get('relationship_tone')
+    thread_status = result.get('thread_status')
+    key_quotes = result.get('key_quotes')
+
     if phase:
         from store.database import db_cursor as _db_cursor
         with _db_cursor() as cur:
             cur.execute("UPDATE documents SET phase = %s WHERE document_id = %s", (phase, document_id))
+
+    update_document_metadata(document_id, summary, relationship_tone, thread_status, key_quotes)
 
     # Step 9 — Classification (email only)
     if input_type == 'email':
@@ -230,7 +239,31 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
             save_action_item(tenant_id, project_id, fact['description'],
                              None, fact.get('due_date'), document_id, fact.get('urgency'), fact.get('due_date_basis'))
 
-    # Step 11 — Auto-complete action items
+    # Step 11 — Save contacts
+    for contact in result.get('contacts', []):
+        c = upsert_contact(tenant_id, contact['name'], contact.get('email'),
+                           contact.get('phone'), contact.get('company'), contact.get('role'))
+        if c and project_id:
+            link_contact_to_project(project_id, c['contact_id'], contact.get('role'))
+
+    # Step 12 — Save commitments
+    for cm in result.get('commitments', []):
+        save_commitment(tenant_id, project_id, cm['who'], cm['what'],
+                        cm.get('by_when'), document_id, cm.get('source_quote'))
+
+    # Step 13 — Save financial items
+    for fi in result.get('financial_items', []):
+        save_financial_item(tenant_id, project_id, fi['type'], fi['from_entity'],
+                            fi.get('amount'), fi.get('gst_included', False),
+                            fi.get('invoice_number'), fi.get('due_date'),
+                            fi.get('status', 'invoiced'), document_id)
+
+    # Step 14 — Save follow-ups
+    for fu in result.get('follow_ups', []):
+        save_follow_up(tenant_id, project_id, fu['who_should_respond'], fu['to_whom'],
+                       fu['regarding'], fu.get('by_when'), document_id, fu.get('source_quote'))
+
+    # Step 15 — Auto-complete action items
     for update in result.get('action_updates', []):
         _complete_action_item(update['action_id'], update['reason'])
 

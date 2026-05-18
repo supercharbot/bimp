@@ -108,3 +108,77 @@ def log_activity(tenant_id, project_id, type, description, user_id=None):
             "INSERT INTO activity_feed (tenant_id, project_id, type, description, user_id) VALUES (%s,%s,%s,%s,%s)",
             (tenant_id, project_id, type, description, user_id)
         )
+
+
+def upsert_contact(tenant_id, name, email, phone=None, company=None, contact_type=None):
+    if not email:
+        return None
+    with db_cursor() as cur:
+        cur.execute(
+            """INSERT INTO contacts (tenant_id, name, email, phone, company, type)
+               VALUES (%s, %s, %s, %s, %s, %s)
+               ON CONFLICT (tenant_id, email) DO UPDATE
+               SET name = COALESCE(NULLIF(EXCLUDED.name, ''), contacts.name),
+                   phone = COALESCE(NULLIF(EXCLUDED.phone, ''), contacts.phone),
+                   company = COALESCE(NULLIF(EXCLUDED.company, ''), contacts.company),
+                   type = COALESCE(NULLIF(EXCLUDED.type, ''), contacts.type)
+               RETURNING *""",
+            (tenant_id, name, email.lower().strip(), phone, company, contact_type)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def link_contact_to_project(project_id, contact_id, role=None):
+    if not project_id or not contact_id:
+        return
+    with db_cursor() as cur:
+        cur.execute(
+            """INSERT INTO project_contacts (project_id, contact_id, role)
+               VALUES (%s, %s, %s)
+               ON CONFLICT DO NOTHING""",
+            (project_id, contact_id, role)
+        )
+
+
+def save_commitment(tenant_id, project_id, who, description, due_date, source_document_id, source_quote, status='open'):
+    with db_cursor() as cur:
+        cur.execute(
+            """INSERT INTO commitments (tenant_id, project_id, who, description, due_date, source_document_id, source_quote, status)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+            (tenant_id, project_id, who, description, due_date, source_document_id, source_quote, status)
+        )
+        return dict(cur.fetchone())
+
+
+def save_financial_item(tenant_id, project_id, item_type, from_entity, amount, gst_included, invoice_number, due_date, status, source_document_id):
+    with db_cursor() as cur:
+        cur.execute(
+            """INSERT INTO financial_items (tenant_id, project_id, type, from_entity, amount, gst_included, invoice_number, due_date, status, source_document_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+            (tenant_id, project_id, item_type, from_entity, amount, gst_included, invoice_number, due_date, status, source_document_id)
+        )
+        return dict(cur.fetchone())
+
+
+def save_follow_up(tenant_id, project_id, who_should_respond, to_whom, regarding, by_when, source_document_id, source_quote, status='pending'):
+    with db_cursor() as cur:
+        cur.execute(
+            """INSERT INTO follow_ups (tenant_id, project_id, who_should_respond, to_whom, regarding, by_when, source_document_id, source_quote, status)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+            (tenant_id, project_id, who_should_respond, to_whom, regarding, by_when, source_document_id, source_quote, status)
+        )
+        return dict(cur.fetchone())
+
+
+def update_document_metadata(document_id, summary=None, relationship_tone=None, thread_status=None, key_quotes=None):
+    with db_cursor() as cur:
+        cur.execute(
+            """UPDATE documents SET
+               summary = COALESCE(%s, summary),
+               relationship_tone = COALESCE(%s, relationship_tone),
+               thread_status = COALESCE(%s, thread_status),
+               key_quotes = COALESCE(%s, key_quotes)
+               WHERE document_id = %s""",
+            (summary, relationship_tone, thread_status, json.dumps(key_quotes) if key_quotes else None, document_id)
+        )
