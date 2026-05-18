@@ -177,6 +177,7 @@ def understand(envelope, chunks, project_identifiers, open_action_items=None):
     response = client.messages.create(
         model=MODEL,
         max_tokens=3000,
+        temperature=0,
         messages=[{"role": "user", "content": prompt}]
     )
 
