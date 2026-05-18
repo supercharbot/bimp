@@ -14,30 +14,40 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 KNOWN_DOMAIN = "develo.net.au"
 
-SCREEN_PROMPT = """You are a mail filter for a land development company. Decide if this document is genuine business correspondence or noise.
+SCREEN_PROMPT = """You are screening incoming email for a land development company called Develo based in Adelaide, South Australia. Develo develops residential House and Land Packages — they acquire sites, subdivide land, manage planning approvals, coordinate builders, and sell to purchasers.
 
-NOISE (return false):
-- Marketing emails, newsletters, promotional content
-- Automated system notifications (Google, Microsoft, Xero, software platforms)
-- Subscription confirmations, password resets, security alerts
-- Industry news digests, property market updates not addressed to the business
-- Bulk email, mailing lists, no-reply senders
+The support@develo.net.au inbox receives both genuine business correspondence and noise. Your job is to classify this email.
+
+REJECT (return false) — this is noise:
+- Marketing emails, property newsletters, industry news digests
+- Automated platform notifications (Google Workspace, Xero, MYOB, Slack, Trello, DocuSign admin, software updates)
+- Subscription confirmations, password resets, security alerts, 2FA codes
+- Bulk email from no-reply addresses, mailing lists
 - Social media notifications
-- Calendar sharing notifications, automated meeting summaries from platforms
+- Generic sales outreach or cold emails not about a specific Develo project
+- Calendar sharing notifications from unknown parties
+- Job application auto-responses, recruitment spam
 
-GENUINE (return true):
-- Emails from/to councils, contractors, consultants, clients, agents, solicitors
-- Invoices, quotes, purchase orders
-- Project correspondence (plans, reports, approvals, inspections)
-- Government or regulatory correspondence
-- Any email that mentions a specific property, address, project, or job
+ACCEPT (return true) — this is genuine business correspondence:
+- Emails from councils, government agencies, SA Water, SAPN, DHUD, PlanSA, CFS, EPA
+- Emails from builders, contractors, subcontractors, trades about specific work
+- Invoices, quotes, purchase orders, payment confirmations
+- Solicitor, conveyancer, or accountant correspondence
+- Emails mentioning a specific property address, lot number, DA number, or project name
+- Purchaser or sales agent correspondence
+- Emails from engineers, surveyors, planners, energy assessors, arborists, certifiers
+- Bank or lender correspondence (Beyond Bank, Bluestreak, HomeStart)
+- Insurance correspondence
+- Any email that references a real person by name in a business context
+
+When uncertain, ACCEPT. It is better to process a marginal email than to miss genuine correspondence.
 
 Source: {source}
 Subject: {subject}
 From: {sender}
 Date: {timestamp}
 
-First 500 words of content:
+First 300 words of content:
 {content}
 
 Return ONLY valid JSON: {{"pass": true}} or {{"pass": false, "reason": "brief reason"}}"""
@@ -55,13 +65,12 @@ def is_known_user(email_str):
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=1, max=5))
 def screen_document(envelope, text):
     sender = envelope.get('from') or envelope.get('author') or ''
-    recipient = envelope.get('to') or ''
 
     if is_known_user(sender):
         logger.info(f"Haiku skip: known sender ({sender})")
         return {'pass': True, 'reason': 'known_user'}
 
-    content_preview = ' '.join(text.split()[:500])
+    content_preview = ' '.join(text.split()[:300])
 
     prompt = SCREEN_PROMPT.format(
         source=envelope.get('source', 'unknown'),
@@ -78,12 +87,12 @@ def screen_document(envelope, text):
     )
 
     raw = response.content[0].text.strip()
-    # Extract JSON from response
-    json_match = re.search(r"\{[^}]+\}", raw)
-    if json_match:
-        raw = json_match.group(0)
     raw = re.sub(r'^```(?:json)?\s*', '', raw)
     raw = re.sub(r'\s*```$', '', raw)
+
+    json_match = re.search(r'\{[^}]+\}', raw)
+    if json_match:
+        raw = json_match.group(0)
 
     try:
         result = json.loads(raw)
