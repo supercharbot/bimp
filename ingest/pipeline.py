@@ -64,6 +64,7 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
         input_type: 'email' or 'drive'
         file_bytes: Raw file bytes for Drive files or attachments
         skip_triage: If True, bypass triage (used during first onboarding batch)
+        folder_project_id: If set, skip understand and use this project ID (Drive folder matching)
     """
     # Step 1 — Normalise
     if input_type == 'email':
@@ -95,8 +96,7 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
             )
             return None
 
-
-    # Step 2b - Haiku screening
+    # Step 2b — Haiku screening
     if text:
         screen_result = screen_document(envelope, text)
         if not screen_result['pass']:
@@ -228,44 +228,48 @@ def run_pipeline(tenant_id, raw_input, input_type, file_bytes=None, skip_triage=
 
     # Step 10 — Save structured facts
     for fact in result.get('facts', []):
-        if fact['type'] == 'deadline':
+        # Deadlines and action items: email only (Drive docs are historical)
+        if fact['type'] == 'deadline' and input_type == 'email':
             save_deadline(tenant_id, project_id, fact['description'],
                           fact.get('due_date'), document_id, fact.get('urgency'), fact.get('due_date_basis'))
         elif fact['type'] == 'decision':
             save_decision(tenant_id, project_id, fact['description'],
                           fact.get('due_date') or str(datetime.utcnow().date()),
                           document_id)
-        elif fact['type'] == 'action_item':
+        elif fact['type'] == 'action_item' and input_type == 'email':
             save_action_item(tenant_id, project_id, fact['description'],
                              None, fact.get('due_date'), document_id, fact.get('urgency'), fact.get('due_date_basis'))
 
-    # Step 11 — Save contacts
+    # Step 11 — Save contacts (all sources)
     for contact in result.get('contacts', []):
         c = upsert_contact(tenant_id, contact['name'], contact.get('email'),
                            contact.get('phone'), contact.get('company'), contact.get('role'))
         if c and project_id:
             link_contact_to_project(project_id, c['contact_id'], contact.get('role'))
 
-    # Step 12 — Save commitments
+    # Step 12 — Save commitments (email only)
     for cm in result.get('commitments', []):
-        save_commitment(tenant_id, project_id, cm['who'], cm['what'],
-                        cm.get('by_when'), document_id, cm.get('source_quote'))
+        if input_type == 'email':
+            save_commitment(tenant_id, project_id, cm['who'], cm['what'],
+                            cm.get('by_when'), document_id, cm.get('source_quote'))
 
-    # Step 13 — Save financial items
+    # Step 13 — Save financial items (all sources)
     for fi in result.get('financial_items', []):
         save_financial_item(tenant_id, project_id, fi['type'], fi['from_entity'],
                             fi.get('amount'), fi.get('gst_included', False),
                             fi.get('invoice_number'), fi.get('due_date'),
                             fi.get('status', 'invoiced'), document_id)
 
-    # Step 14 — Save follow-ups
+    # Step 14 — Save follow-ups (email only)
     for fu in result.get('follow_ups', []):
-        save_follow_up(tenant_id, project_id, fu['who_should_respond'], fu['to_whom'],
-                       fu['regarding'], fu.get('by_when'), document_id, fu.get('source_quote'))
+        if input_type == 'email':
+            save_follow_up(tenant_id, project_id, fu['who_should_respond'], fu['to_whom'],
+                           fu['regarding'], fu.get('by_when'), document_id, fu.get('source_quote'))
 
-    # Step 15 — Auto-complete action items
-    for update in result.get('action_updates', []):
-        _complete_action_item(update['action_id'], update['reason'])
+    # Step 15 — Auto-complete action items (email only)
+    if input_type == 'email':
+        for update in result.get('action_updates', []):
+            _complete_action_item(update['action_id'], update['reason'])
 
     log_activity(tenant_id, project_id, 'document_ingested',
                  f"Ingested {envelope.get('source')}: {envelope.get('subject') or envelope.get('file_name')}")
